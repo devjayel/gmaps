@@ -180,19 +180,31 @@ npm run electron:build
 
 This repository includes a continuous integration and deployment workflow located in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-To publish a new GitHub Release with the compiled setup installer attached:
+Releasing is completely automated with three convenient options:
 
-1. **Update Version**: Bump the `"version"` field in `package.json` (e.g. `1.0.1`).
-2. **Commit and Tag**:
+### Option A: 1-Click Release from GitHub Actions UI (Recommended)
+1. Go to the **Actions** tab on GitHub: [devjayel/gmaps/actions](https://github.com/devjayel/gmaps/actions).
+2. Select **Release GMaps** in the sidebar.
+3. Click **Run workflow** dropdown:
+   - Select version bump: `patch` (e.g. `1.0.1` ➔ `1.0.2`), `minor`, `major`, or `none`.
+   - Click the green **Run workflow** button.
+4. GitHub Actions automatically updates the version, tags the commit, packages the installer, and publishes the release!
+
+### Option B: Automatic Release on Push to Main
+1. Bump `"version"` in [`package.json`](package.json) (e.g. `"1.0.1"`).
+2. Push to `main`:
    ```bash
-   git add package.json
-   git commit -m "chore: bump version to 1.0.1"
-   git tag v1.0.1
-   git push origin main --tags
+   git add package.json package-lock.json
+   git commit -m "chore: release v1.0.1"
+   git push origin main
    ```
-3. **Automated Publishing**:
-   - GitHub Actions will automatically spin up a `windows-latest` runner.
-   - It compiles the React app, packages the Electron NSIS installer, and uploads `GMaps-Setup-1.0.1.exe` directly to a newly published GitHub Release!
+3. GitHub Actions automatically detects the new version, builds `GMaps-Setup-1.0.1.exe`, creates tag `v1.0.1`, and publishes the release!
+
+### Option C: Manual Git Tag
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
 
 ---
 

@@ -2,9 +2,24 @@ name: Release GMaps
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - 'package.json'
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Auto-bump version before release (or keep current)'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - 'none'
+          - 'patch'
+          - 'minor'
+          - 'major'
 
 permissions:
   contents: write
@@ -17,6 +32,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,19 +41,76 @@ jobs:
           node-version: 24
           cache: 'npm'
 
+      - name: Resolve Version and Handle Auto-Bump
+        id: vars
+        shell: bash
+        run: |
+          BUMP_INPUT="${{ github.event.inputs.bump }}"
+
+          # If manually triggered with bump option (patch / minor / major)
+          if [ "$BUMP_INPUT" != "none" ] && [ -n "$BUMP_INPUT" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            npm version "$BUMP_INPUT" --no-git-tag-version
+            NEW_VER=$(node -p "require('./package.json').version")
+            NEW_TAG="v$NEW_VER"
+            git add package.json package-lock.json
+            git commit -m "chore(release): bump version to $NEW_TAG [skip ci]"
+            git push origin main
+            echo "version=$NEW_VER" >> $GITHUB_OUTPUT
+            echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Bumped version to $NEW_TAG"
+            exit 0
+          fi
+
+          # Read current version from package.json
+          VERSION=$(node -p "require('./package.json').version")
+
+          # If triggered by a git tag, use the tag name
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+          else
+            TAG="v$VERSION"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # Check if release already exists on GitHub
+          STATUS=$(node -e "
+            fetch('https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}', {
+              headers: { 'User-Agent': 'Node', 'Authorization': 'Bearer ${{ secrets.GITHUB_TOKEN }}' }
+            }).then(r => console.log(r.status)).catch(() => console.log('0'))
+          ")
+
+          # If triggered by push to main and release already exists, skip
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" != refs/tags/* ]] && [ "$STATUS" = "200" ]; then
+            echo "Release $TAG already exists on GitHub. Skipping build and release."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Resolved Version: $VERSION, Tag: $TAG"
+
       - name: Install Dependencies
+        if: steps.vars.outputs.skip != 'true'
         run: npm ci
 
       - name: Build React and Package Electron App
+        if: steps.vars.outputs.skip != 'true'
         run: npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish GitHub Release
+        if: steps.vars.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          name: GMaps ${{ github.ref_name }}
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: GMaps ${{ steps.vars.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true

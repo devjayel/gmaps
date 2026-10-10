@@ -1,7 +1,7 @@
 {
     "name": "gmaps",
     "private": true,
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Tactical desktop map manager and 1-click installer for Command & Conquer: Generals and Zero Hour.",
     "type": "module",
     "main": "main.cjs",
