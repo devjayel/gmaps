@@ -3,8 +3,82 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const AdmZip = require("adm-zip");
+const { autoUpdater } = require("electron-updater");
 
 let mainWindow;
+
+// Auto-updater configuration
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function setupAutoUpdater() {
+    autoUpdater.on("checking-for-update", () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("update-status", { status: "checking" });
+        }
+    });
+
+    autoUpdater.on("update-available", (info) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("update-status", {
+                status: "available",
+                info: {
+                    version: info.version,
+                    releaseDate: info.releaseDate,
+                    releaseNotes: info.releaseNotes,
+                    files: info.files,
+                },
+            });
+        }
+    });
+
+    autoUpdater.on("update-not-available", (info) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("update-status", {
+                status: "not-available",
+                info: {
+                    version: info?.version || app.getVersion(),
+                },
+            });
+        }
+    });
+
+    autoUpdater.on("download-progress", (progressObj) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("update-status", {
+                status: "downloading",
+                progress: {
+                    percent: Math.round(progressObj.percent),
+                    bytesPerSecond: progressObj.bytesPerSecond,
+                    transferred: progressObj.transferred,
+                    total: progressObj.total,
+                },
+            });
+        }
+    });
+
+    autoUpdater.on("update-downloaded", (info) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("update-status", {
+                status: "downloaded",
+                info: {
+                    version: info.version,
+                    releaseDate: info.releaseDate,
+                },
+            });
+        }
+    });
+
+    autoUpdater.on("error", (err) => {
+        console.error("AutoUpdater error:", err);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("update-status", {
+                status: "error",
+                error: err?.message || "Failed to check for updates.",
+            });
+        }
+    });
+}
 
 // Default map directories on Windows
 function getDefaultPaths() {
@@ -225,27 +299,47 @@ async function fetchCnCLabsMaps({ version, forceRefresh = false }) {
             maxPage = isZH ? 21 : 7;
         }
 
-        // Fetch remaining pages in parallel
-        const fetchPromises = [];
+        // Fetch remaining pages in small batches to respect rate limits
+        const pageList = [];
         for (let p = 2; p <= maxPage; p++) {
-            fetchPromises.push(
-                fetch(`${baseUrl}?page=${p}`, {
-                    headers: {
-                        "User-Agent":
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        Accept: "text/html",
-                    },
-                })
-                    .then((r) => r.text())
-                    .then((h) => parseMapItemsFromHtml(h))
-                    .catch((err) => {
-                        console.error(`Error fetching page ${p}:`, err);
-                        return [];
-                    })
-            );
+            pageList.push(p);
         }
 
-        const remainingResults = await Promise.all(fetchPromises);
+        const remainingResults = [];
+        const CONCURRENCY = 3;
+        const DELAY_BETWEEN_BATCHES_MS = 250;
+
+        for (let i = 0; i < pageList.length; i += CONCURRENCY) {
+            const batch = pageList.slice(i, i + CONCURRENCY);
+            const batchResults = await Promise.all(
+                batch.map(async (p) => {
+                    try {
+                        const r = await fetch(`${baseUrl}?page=${p}`, {
+                            headers: {
+                                "User-Agent":
+                                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                Accept: "text/html",
+                            },
+                        });
+                        if (!r.ok) {
+                            console.warn(`Page ${p} returned HTTP ${r.status}`);
+                            return [];
+                        }
+                        const h = await r.text();
+                        return parseMapItemsFromHtml(h);
+                    } catch (err) {
+                        console.error(`Error fetching page ${p}:`, err);
+                        return [];
+                    }
+                })
+            );
+            remainingResults.push(...batchResults.flat());
+
+            if (i + CONCURRENCY < pageList.length) {
+                await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_BATCHES_MS));
+            }
+        }
+
         const allItems = [page1Items, ...remainingResults].flat();
 
         // Deduplicate items by detailUrl or name
@@ -296,7 +390,7 @@ async function fetchCnCLabsMaps({ version, forceRefresh = false }) {
 }
 
 // Download and install map into destination folder
-async function installMap({ downloadUrl, mapName, targetFolder, refererUrl }) {
+async function installMap({ downloadUrl, mapName, targetFolder, refererUrl, detailUrl }) {
     if (!downloadUrl) {
         throw new Error("No download URL provided for this map.");
     }
@@ -309,20 +403,110 @@ async function installMap({ downloadUrl, mapName, targetFolder, refererUrl }) {
         fs.mkdirSync(targetFolder, { recursive: true });
     }
 
-    // 1. Fetch zip
-    const res = await fetch(downloadUrl, {
-        headers: {
-            "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Referer: refererUrl || "https://www.cnclabs.com/maps/generals/zerohour-maps.aspx",
-        },
-    });
+    // 1. Fetch zip archive with retry, token refresh and backoff
+    let currentDownloadUrl = downloadUrl;
+    let arrayBuffer = null;
+    const maxAttempts = 3;
 
-    if (!res.ok) {
-        throw new Error(`Failed to download map file (HTTP ${res.status})`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const res = await fetch(currentDownloadUrl, {
+                headers: {
+                    "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    Referer: refererUrl || detailUrl || "https://www.cnclabs.com/maps/generals/zerohour-maps.aspx",
+                },
+            });
+
+            if (res.status === 429) {
+                console.warn(`[GMaps] Download attempt ${attempt} hit HTTP 429 rate limit.`);
+                if (attempt < maxAttempts) {
+                    // Backoff delay before retry
+                    await new Promise((r) => setTimeout(r, 2000 * attempt));
+
+                    // If detailUrl is provided, refresh token by re-fetching detail page
+                    if (detailUrl) {
+                        try {
+                            const detailRes = await fetch(detailUrl, {
+                                headers: {
+                                    "User-Agent":
+                                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                    Accept: "text/html",
+                                },
+                            });
+                            if (detailRes.ok) {
+                                const detailHtml = await detailRes.text();
+                                const freshMatch = detailHtml.match(/href="(\/downloads\/file\/[^"]+)"/);
+                                if (freshMatch) {
+                                    currentDownloadUrl = "https://www.cnclabs.com" + freshMatch[1];
+                                    console.log("[GMaps] Refreshed download token from detail page.");
+                                }
+                            }
+                        } catch (e) {
+                            console.warn("[GMaps] Failed to scrape fresh token:", e.message);
+                        }
+                    }
+                    continue;
+                } else {
+                    throw new Error("C&C Labs is temporarily limiting requests (HTTP 429: Too Many Requests). Please wait 10-15 seconds before trying again.");
+                }
+            }
+
+            if (!res.ok) {
+                if (attempt < maxAttempts) {
+                    await new Promise((r) => setTimeout(r, 1500));
+                    continue;
+                }
+                throw new Error(`Failed to download map file (HTTP ${res.status})`);
+            }
+
+            const contentType = res.headers.get("content-type") || "";
+            if (contentType.includes("text/html")) {
+                const text = await res.text();
+                if (text.includes("Too Many Requests")) {
+                    throw new Error("C&C Labs is temporarily limiting requests (HTTP 429: Too Many Requests). Please wait 10-15 seconds before trying again.");
+                }
+                // If token expired, try to refresh via detail page if we have attempts left
+                if (detailUrl && attempt < maxAttempts) {
+                    console.warn(`[GMaps] Received HTML page instead of zip, attempting token refresh.`);
+                    await new Promise((r) => setTimeout(r, 1500));
+                    try {
+                        const detailRes = await fetch(detailUrl, {
+                            headers: {
+                                "User-Agent":
+                                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                Accept: "text/html",
+                            },
+                        });
+                        if (detailRes.ok) {
+                            const detailHtml = await detailRes.text();
+                            const freshMatch = detailHtml.match(/href="(\/downloads\/file\/[^"]+)"/);
+                            if (freshMatch) {
+                                currentDownloadUrl = "https://www.cnclabs.com" + freshMatch[1];
+                                continue;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("[GMaps] Token refresh failed:", e.message);
+                    }
+                }
+                throw new Error("Received an unexpected HTML response from C&C Labs instead of a map archive.");
+            }
+
+            arrayBuffer = await res.arrayBuffer();
+            break;
+        } catch (err) {
+            if (attempt >= maxAttempts) {
+                throw err;
+            }
+            console.warn(`[GMaps] Download attempt ${attempt} failed: ${err.message}. Retrying...`);
+            await new Promise((r) => setTimeout(r, 1500));
+        }
     }
 
-    const arrayBuffer = await res.arrayBuffer();
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error("The downloaded archive is empty or invalid.");
+    }
     const buffer = Buffer.from(arrayBuffer);
     const zip = new AdmZip(buffer);
     const entries = zip.getEntries();
@@ -467,6 +651,49 @@ function registerIpcHandlers() {
     ipcMain.handle("delete-installed-map", (event, params) => {
         return deleteInstalledMap(params);
     });
+
+    // Auto Updater IPC Handlers
+    ipcMain.handle("get-app-version", () => {
+        return app.getVersion();
+    });
+
+    ipcMain.handle("check-for-updates", async () => {
+        if (!app.isPackaged) {
+            return {
+                isDev: true,
+                version: app.getVersion(),
+                message: "Auto-updater is active in packaged production releases.",
+            };
+        }
+        try {
+            const result = await autoUpdater.checkForUpdates();
+            return {
+                isDev: false,
+                version: app.getVersion(),
+                updateInfo: result?.updateInfo || null,
+            };
+        } catch (err) {
+            console.error("[GMaps] Check for updates error:", err);
+            throw err;
+        }
+    });
+
+    ipcMain.handle("download-update", async () => {
+        try {
+            await autoUpdater.downloadUpdate();
+            return { success: true };
+        } catch (err) {
+            console.error("[GMaps] Download update error:", err);
+            throw err;
+        }
+    });
+
+    ipcMain.handle("quit-and-install", () => {
+        setImmediate(() => {
+            autoUpdater.quitAndInstall();
+        });
+        return true;
+    });
 }
 
 // Completely disable and remove the application menu
@@ -474,6 +701,7 @@ Menu.setApplicationMenu(null);
 
 app.on("ready", () => {
     registerIpcHandlers();
+    setupAutoUpdater();
 
     mainWindow = new BrowserWindow({
         width: 1280,
@@ -504,6 +732,15 @@ app.on("ready", () => {
         });
     } else {
         mainWindow.loadFile(path.join(__dirname, "dist", "index.html"));
+    }
+
+    // Check for updates automatically in production release after initial launch
+    if (app.isPackaged) {
+        setTimeout(() => {
+            autoUpdater.checkForUpdates().catch((err) => {
+                console.warn("[GMaps] Initial update check failed:", err.message);
+            });
+        }, 4000);
     }
 });
 

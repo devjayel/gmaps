@@ -17,10 +17,12 @@
         "react:lint": "eslint .",
         "react:preview": "vite preview",
         "electron:dev": "electron .",
-        "electron:build": "npm run react:build && electron-builder"
+        "electron:build": "npm run react:build && electron-builder",
+        "electron:publish": "npm run react:build && electron-builder --publish always"
     },
     "dependencies": {
         "adm-zip": "^0.6.1",
+        "electron-updater": "^6.8.9",
         "lucide-react": "^1.54.0",
         "react": "^19.3.0",
         "react-dom": "^19.3.0"
@@ -59,6 +61,13 @@
         "directories": {
             "output": "release"
         },
+        "publish": [
+            {
+                "provider": "github",
+                "owner": "devjayel",
+                "repo": "gmaps"
+            }
+        ],
         "win": {
             "target": [
                 {

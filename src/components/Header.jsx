@@ -1,4 +1,4 @@
-import { FolderOpen, RefreshCw, Settings, MapPin, Globe, HardDrive } from 'lucide-react';
+import { FolderOpen, RefreshCw, Settings, MapPin, Globe, HardDrive, Sparkles } from 'lucide-react';
 
 export default function Header({
   selectedVersion,
@@ -12,6 +12,10 @@ export default function Header({
   onOpenFolder,
   onRefresh,
   isLoading,
+  appVersion,
+  hasUpdate,
+  updateInfo,
+  onOpenUpdateModal,
 }) {
   return (
     <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md px-6 py-3 flex items-center justify-between gap-4 sticky top-0 z-30">
@@ -29,6 +33,14 @@ export default function Header({
             <span className="text-xs text-zinc-500 font-normal">
               General Maps
             </span>
+            <button
+              type="button"
+              onClick={onOpenUpdateModal}
+              title="Click to check for updates"
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              v{appVersion || '1.0.0'}
+            </button>
           </div>
         </div>
 
@@ -155,6 +167,19 @@ export default function Header({
             className="p-2 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
           >
             <FolderOpen className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Update Notification Badge */}
+        {hasUpdate && (
+          <button
+            type="button"
+            onClick={onOpenUpdateModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/40 text-teal-300 text-xs font-semibold shadow-sm transition-all animate-pulse"
+            title="A new GMaps version is available! Click to update."
+          >
+            <Sparkles className="w-3.5 h-3.5 text-teal-400" />
+            <span>Update v{updateInfo?.version || 'Available'}</span>
           </button>
         )}
 

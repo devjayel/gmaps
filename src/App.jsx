@@ -8,6 +8,7 @@ import FolderSetupModal from './components/FolderSetupModal';
 import InstalledMapsView from './components/InstalledMapsView';
 import Pagination from './components/Pagination';
 import Toast from './components/Toast';
+import UpdateModal from './components/UpdateModal';
 import {
   AlertTriangle,
   Folder,
@@ -66,12 +67,100 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Auto-updater state
+  const [appVersion, setAppVersion] = useState('1.0.0');
+  const [updateStatus, setUpdateStatus] = useState('idle');
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [updateError, setUpdateError] = useState(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isDevMode, setIsDevMode] = useState(false);
+
   const showToast = useCallback((type, title, message) => {
     setToast({ type, title, message });
     setTimeout(() => {
       setToast((prev) => (prev?.message === message ? null : prev));
     }, 4000);
   }, []);
+
+  // Listen for auto-updater events & fetch app version
+  useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI
+        .getAppVersion()
+        .then((v) => {
+          if (v) setAppVersion(v);
+        })
+        .catch(() => {});
+    }
+
+    if (window.electronAPI?.onUpdateStatus) {
+      const unsubscribe = window.electronAPI.onUpdateStatus((data) => {
+        if (!data) return;
+
+        setUpdateStatus(data.status);
+
+        if (data.status === 'available') {
+          setUpdateInfo(data.info);
+          showToast(
+            'info',
+            'Update Available',
+            `GMaps v${data.info?.version} is available for download!`
+          );
+        } else if (data.status === 'downloading') {
+          setDownloadProgress(data.progress);
+        } else if (data.status === 'downloaded') {
+          setUpdateInfo(data.info);
+          showToast(
+            'success',
+            'Update Ready',
+            `GMaps v${data.info?.version} downloaded. Restart to install!`
+          );
+        } else if (data.status === 'error') {
+          setUpdateError(data.error);
+        }
+      });
+
+      return () => unsubscribe();
+    }
+  }, [showToast]);
+
+  const handleCheckForUpdates = async () => {
+    if (!window.electronAPI?.checkForUpdates) return;
+    setUpdateStatus('checking');
+    setUpdateError(null);
+    setIsUpdateModalOpen(true);
+
+    try {
+      const res = await window.electronAPI.checkForUpdates();
+      if (res?.isDev) {
+        setIsDevMode(true);
+        setUpdateStatus('not-available');
+      }
+    } catch (err) {
+      console.error('Check for updates failed:', err);
+      setUpdateStatus('error');
+      setUpdateError(err.message || 'Failed to check for updates.');
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!window.electronAPI?.downloadUpdate) return;
+    setUpdateStatus('downloading');
+    try {
+      await window.electronAPI.downloadUpdate();
+    } catch (err) {
+      console.error('Download update failed:', err);
+      setUpdateStatus('error');
+      setUpdateError(err.message || 'Failed to download update.');
+    }
+  };
+
+  const handleQuitAndInstall = () => {
+    if (window.electronAPI?.quitAndInstall) {
+      window.electronAPI.quitAndInstall();
+    }
+  };
 
   // Compute active maps folder for current version
   const currentFolder = useMemo(() => {
@@ -213,6 +302,7 @@ export default function App() {
 
       const result = await window.electronAPI.installMap({
         downloadUrl: map.downloadUrl,
+        detailUrl: map.detailUrl,
         mapName: map.name,
         targetFolder: currentFolder,
         refererUrl,
@@ -226,7 +316,20 @@ export default function App() {
     } catch (err) {
       console.error('Installation failed:', err);
       setInstallStates((prev) => ({ ...prev, [map.id]: 'error' }));
-      showToast('error', 'Error', err.message || 'Failed to download or extract map.');
+      const is429 =
+        err?.message?.includes('429') ||
+        err?.message?.toLowerCase().includes('too many requests') ||
+        err?.message?.toLowerCase().includes('rate limit');
+
+      if (is429) {
+        showToast(
+          'error',
+          'Rate Limited (HTTP 429)',
+          'C&C Labs is temporarily limiting requests. Please wait 10-15 seconds and try again.'
+        );
+      } else {
+        showToast('error', 'Installation Failed', err.message || 'Failed to download or extract map.');
+      }
     }
   };
 
@@ -360,6 +463,10 @@ export default function App() {
         onOpenFolder={() => handleOpenFolder(currentFolder)}
         onRefresh={() => loadMaps(true)}
         isLoading={isLoading}
+        appVersion={appVersion}
+        hasUpdate={updateStatus === 'available' || updateStatus === 'downloaded'}
+        updateInfo={updateInfo}
+        onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -531,6 +638,8 @@ export default function App() {
         onOpenFolder={handleOpenFolder}
         onEnsureFolder={handleEnsureFolder}
         installedMaps={installedMaps}
+        appVersion={appVersion}
+        onOpenUpdateModal={handleCheckForUpdates}
       />
 
       {/* Details Modal */}
@@ -550,6 +659,22 @@ export default function App() {
         onClose={() => setPreviewImage(null)}
         imageUrl={previewImage?.url}
         title={previewImage?.title}
+      />
+
+      {/* Software Auto-Updater Modal */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        currentVersion={appVersion}
+        updateStatus={updateStatus}
+        updateInfo={updateInfo}
+        downloadProgress={downloadProgress}
+        errorMessage={updateError}
+        isDevMode={isDevMode}
+        onCheckForUpdates={handleCheckForUpdates}
+        onDownloadUpdate={handleDownloadUpdate}
+        onQuitAndInstall={handleQuitAndInstall}
+        onOpenExternal={handleOpenExternal}
       />
 
       {/* Toast Notification */}

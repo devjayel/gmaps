@@ -83,6 +83,12 @@
 - **Safe Map Deletion**: Integrated deletion modal with directory traversal protection to cleanly remove maps you no longer play.
 - **Explorer Reveal**: Direct button to launch Windows File Explorer directly highlighted inside any map folder.
 
+### 🔄 Integrated GitHub Releases Auto-Updater
+- **Automated Update Detection**: Periodically checks the official `devjayel/gmaps` repository on GitHub Releases for new updates on startup.
+- **In-App Update Modal**: Displays new release version tag, publishing date, changelog / release notes, and download progress.
+- **Background Download & 1-Click Install**: Downloads the update payload in the background with real-time download speed and byte counters, then lets you restart and install instantly or apply on exit.
+- **Manual Check Capability**: Check for updates on demand via the version badge in the Header or inside the Settings modal.
+
 ### 🎖️ Teal Military Tactical HUD Theme
 - Sleek dark tactical command center theme inspired by modern military HUDs.
 - Glowing cyan/teal neon accents, radar grid backdrops, and glassmorphic panels.

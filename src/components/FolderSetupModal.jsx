@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Folder, FolderOpen, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { Folder, FolderOpen, CheckCircle2, AlertTriangle, X, RefreshCw } from 'lucide-react';
 
 export default function FolderSetupModal({
   isOpen,
@@ -13,6 +13,8 @@ export default function FolderSetupModal({
   onOpenFolder,
   onEnsureFolder,
   installedMaps,
+  appVersion,
+  onOpenUpdateModal,
 }) {
   const currentFolder = customFolders[selectedVersion] || defaultPaths?.[selectedVersion]?.path || '';
   const defaultPathInfo = defaultPaths?.[selectedVersion];
@@ -225,6 +227,27 @@ export default function FolderSetupModal({
             <p className="font-mono text-[11px] text-zinc-400">
               • Classic: <span className="text-zinc-300">Documents\Command and Conquer Generals Data\Maps</span>
             </p>
+          </div>
+
+          {/* App Info & Update Trigger */}
+          <div className="p-3 rounded-lg bg-zinc-950/60 border border-zinc-800/60 flex items-center justify-between text-xs">
+            <div>
+              <span className="font-semibold text-zinc-300">GMaps Application</span>
+              <p className="text-zinc-500 font-mono text-[11px]">v{appVersion || '1.0.0'} • GitHub Releases</p>
+            </div>
+            {onOpenUpdateModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenUpdateModal();
+                }}
+                className="px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-800 text-teal-400 hover:text-teal-300 text-xs font-medium transition-colors flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Check for Updates</span>
+              </button>
+            )}
           </div>
         </div>
 
