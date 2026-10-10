@@ -1,0 +1,56 @@
+{
+    "name": "gmaps",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "main": "main.cjs",
+    "homepage": "./",
+    "scripts": {
+        "dev": "concurrently -k -s first --names \"vite,electron\" -c \"blue,magenta\" \"npm run react:dev\" \"wait-on tcp:5173 && npm run electron:dev\"",
+        "react:dev": "vite",
+        "react:build": "vite build",
+        "react:lint": "eslint .",
+        "react:preview": "vite preview",
+        "electron:dev": "electron .",
+        "electron:build": "npm run react:build && electron-builder"
+    },
+    "dependencies": {
+        "adm-zip": "^0.6.1",
+        "lucide-react": "^1.54.0",
+        "react": "^19.3.0",
+        "react-dom": "^19.3.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.5",
+        "@tailwindcss/vite": "^4.3.3",
+        "@types/node": "^24.19.2",
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@vitejs/plugin-react": "^6.1.2",
+        "concurrently": "^10.0.6",
+        "electron": "^44.7.0",
+        "electron-builder": "^26.15.3",
+        "eslint": "^9.39.5",
+        "eslint-plugin-react": "^7.37.5",
+        "eslint-plugin-react-hooks": "^7.1.1",
+        "eslint-plugin-react-refresh": "^0.5.7",
+        "globals": "^17.13.0",
+        "tailwindcss": "^4.3.3",
+        "vite": "^8.3.4",
+        "wait-on": "^9.5.1"
+    },
+    "engines": {
+        "node": ">=24.13.0"
+    },
+    "build": {
+        "appId": "fuxdevs.gmaps",
+        "files": [
+            "dist/**/*",
+            "main.cjs",
+            "preload.js"
+        ],
+        "directories": {
+            "output": "release"
+        }
+    }
+}
