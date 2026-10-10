@@ -1,10 +1,15 @@
 {
     "name": "gmaps",
     "private": true,
-    "version": "0.0.0",
+    "version": "1.0.0",
+    "description": "Tactical desktop map manager and 1-click installer for Command & Conquer: Generals and Zero Hour.",
     "type": "module",
     "main": "main.cjs",
     "homepage": "./",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/devjayel/gmaps.git"
+    },
     "scripts": {
         "dev": "concurrently -k -s first --names \"vite,electron\" -c \"blue,magenta\" \"npm run react:dev\" \"wait-on tcp:5173 && npm run electron:dev\"",
         "react:dev": "vite",
@@ -44,6 +49,8 @@
     },
     "build": {
         "appId": "fuxdevs.gmaps",
+        "productName": "GMaps",
+        "artifactName": "${productName}-Setup-${version}.${ext}",
         "files": [
             "dist/**/*",
             "main.cjs",
@@ -51,6 +58,23 @@
         ],
         "directories": {
             "output": "release"
+        },
+        "win": {
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ]
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "shortcutName": "GMaps"
         }
     }
 }
